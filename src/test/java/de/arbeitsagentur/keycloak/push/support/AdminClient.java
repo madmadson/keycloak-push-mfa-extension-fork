@@ -227,13 +227,7 @@ public final class AdminClient {
 
         // Get current user representation
         URI userUri = baseUri.resolve("/admin/realms/demo/users/" + userId);
-        HttpResponse<String> getResponse = http.send(
-                HttpRequest.newBuilder(userUri)
-                        .header("Authorization", "Bearer " + accessToken)
-                        .header("Accept", "application/json")
-                        .GET()
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> getResponse = sendGetWithRetry(userUri);
 
         if (getResponse.statusCode() != 200) {
             return; // User not found or error
@@ -256,13 +250,7 @@ public final class AdminClient {
         attrsObject.remove(attributeName);
 
         // Update the user
-        HttpResponse<String> putResponse = http.send(
-                HttpRequest.newBuilder(userUri)
-                        .header("Authorization", "Bearer " + accessToken)
-                        .header("Content-Type", "application/json")
-                        .PUT(HttpRequest.BodyPublishers.ofString(userObject.toString()))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> putResponse = sendPutWithRetry(userUri, userObject.toString());
 
         if (putResponse.statusCode() != 204) {
             throw new IllegalStateException(
@@ -324,13 +312,7 @@ public final class AdminClient {
 
         // Get current user representation
         URI userUri = baseUri.resolve("/admin/realms/demo/users/" + userId);
-        HttpResponse<String> getResponse = http.send(
-                HttpRequest.newBuilder(userUri)
-                        .header("Authorization", "Bearer " + accessToken)
-                        .header("Accept", "application/json")
-                        .GET()
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> getResponse = sendGetWithRetry(userUri);
 
         if (getResponse.statusCode() != 200) {
             throw new IllegalStateException(
@@ -354,13 +336,7 @@ public final class AdminClient {
         attrsObject.set(attributeName, MAPPER.createArrayNode().add(attributeValue));
 
         // Update the user
-        HttpResponse<String> putResponse = http.send(
-                HttpRequest.newBuilder(userUri)
-                        .header("Authorization", "Bearer " + accessToken)
-                        .header("Content-Type", "application/json")
-                        .PUT(HttpRequest.BodyPublishers.ofString(userObject.toString()))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> putResponse = sendPutWithRetry(userUri, userObject.toString());
 
         if (putResponse.statusCode() != 204) {
             throw new IllegalStateException(
@@ -477,6 +453,61 @@ public final class AdminClient {
             request = HttpRequest.newBuilder(uri)
                     .header("Authorization", "Bearer " + accessToken)
                     .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+        return response;
+    }
+
+    /**
+     * Send a GET request with automatic token refresh retry on 401.
+     *
+     * <p>The caller is responsible for interpreting non-200 results; this helper
+     * merely ensures a fresh token is acquired if necessary.
+     */
+    private HttpResponse<String> sendGetWithRetry(URI uri) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .header("Authorization", "Bearer " + accessToken)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        // Handle token expiration by refreshing and retrying once
+        if (response.statusCode() == 401) {
+            accessToken = null;
+            ensureAccessToken();
+            request = HttpRequest.newBuilder(uri)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+        return response;
+    }
+
+    /**
+     * Send a PUT request with automatic token refresh retry on 401.
+     * @param uri the URI to PUT
+     * @param body the request body
+     */
+    private HttpResponse<String> sendPutWithRetry(URI uri, String body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .header("Authorization", "Bearer " + accessToken)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        // Handle token expiration by refreshing and retrying once
+        if (response.statusCode() == 401) {
+            accessToken = null;
+            ensureAccessToken();
+            request = HttpRequest.newBuilder(uri)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             response = http.send(request, HttpResponse.BodyHandlers.ofString());
         }
@@ -653,13 +684,7 @@ public final class AdminClient {
             }
         } else {
             URI configUri = baseUri.resolve("/admin/realms/demo/authentication/config/" + configId);
-            HttpResponse<String> existingResponse = http.send(
-                    HttpRequest.newBuilder(configUri)
-                            .header("Authorization", "Bearer " + accessToken)
-                            .header("Accept", "application/json")
-                            .GET()
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> existingResponse = sendGetWithRetry(configUri);
             if (existingResponse.statusCode() != 200) {
                 throw new IllegalStateException("Failed to read authenticator config: " + existingResponse.statusCode()
                         + " body=" + existingResponse.body());
@@ -683,13 +708,7 @@ public final class AdminClient {
             payload.put("alias", alias);
             payload.set("config", configNode);
 
-            HttpResponse<String> updateResponse = http.send(
-                    HttpRequest.newBuilder(configUri)
-                            .header("Authorization", "Bearer " + accessToken)
-                            .header("Content-Type", "application/json")
-                            .PUT(HttpRequest.BodyPublishers.ofString(payload.toString()))
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> updateResponse = sendPutWithRetry(configUri, payload.toString());
             if (updateResponse.statusCode() != 204) {
                 throw new IllegalStateException("Failed to update authenticator config: " + updateResponse.statusCode()
                         + " body=" + updateResponse.body());
